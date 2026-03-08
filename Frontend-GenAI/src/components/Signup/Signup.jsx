@@ -297,7 +297,7 @@ const SignUp = () => {
         </form>
 
         <div className='dont mt-8 text-center text-gray-400'>
-          <p>Already registered? <Link to="/"><span className="text-[#bd4b37] hover:text-[#9c3f30] transition duration-300 ease-in-out">Sign in</span></Link></p>
+          <p>Already registered? <Link to="/login"><span className="text-[#bd4b37] hover:text-[#9c3f30] transition duration-300 ease-in-out">Sign in</span></Link></p>
         </div>
       </div>
     </div>
