@@ -75,6 +75,81 @@ async def process_message_route(message: Message):
         logger.error(f"Error processing message: {e}")
         raise HTTPException(status_code=500, detail="There was an error processing your message.")
 
+@app.post("/process-article")
+async def process_article_route(
+    file: UploadFile = File(None),
+    companyId: Optional[int] = Form(None),
+    userId: Optional[int] = Form(None),
+    articleId: Optional[str] = Form(None),
+    source: Optional[str] = Form(None),
+    url: Optional[str] = Form(None),
+    category: Optional[str] = Form(None),
+    isPrivate: bool = Form(False)
+):
+    # Accept either file upload or URL
+    document_path = None
+    
+    try:
+        if url:
+            # Process document from URL
+            if not companyId:
+                raise HTTPException(status_code=400, detail="companyId is required for processing documents.")
+            
+            logger.debug(f"Processing article from URL: {url}, isPrivate: {isPrivate}")
+            metadata_source = source or "article"
+            
+            # Process the article from URL using the worker module
+            tags = worker.process_article(
+                document_path=url,
+                company_id=companyId,
+                user_id=userId,
+                article_id=articleId or metadata_source,
+                source=metadata_source,
+                category=category,
+                is_private=isPrivate
+            )
+        elif file:
+             # Process uploaded file
+            if not file.filename:
+                raise HTTPException(status_code=400, detail="No file selected. Please try again.")
+            
+            if not companyId:
+                raise HTTPException(status_code=400, detail="companyId is required for processing documents.")
+
+            # Save the uploaded file to the uploads directory
+            document_path = os.path.join(UPLOAD_FOLDER, file.filename)
+            logger.debug(f"Saving uploaded article to {document_path}")
+            with open(document_path, "wb") as buffer:
+                buffer.write(await file.read())
+            logger.debug(f"File successfully saved to {document_path}")
+
+            # Determine metadata defaults
+            metadata_source = source or file.filename
+
+            # Process the uploaded article using the worker module
+            tags = worker.process_article(
+                document_path=document_path,
+                company_id=companyId,
+                user_id=userId,
+                article_id=articleId or file.filename,
+                source=metadata_source,
+                category=category,
+                is_private=isPrivate
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Either file or url is required.")
+
+        return JSONResponse(content={ 
+            "message": "Article processed successfully",
+            "tags": tags
+        }, status_code=200)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error saving or processing article: {e}")
+        raise HTTPException(status_code=500, detail=f"There was an error processing your article: {str(e)}")
+
+
 # Route for processing document uploads
 @app.post("/process-document")
 async def process_document_route(

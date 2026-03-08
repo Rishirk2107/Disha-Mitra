@@ -241,3 +241,29 @@ chatSessionSchema.pre('save', async function(next) {
 });
 
 module.exports.chatSessionSchema = chatSessionSchema;
+
+const articleSchema = mongoose.Schema({
+    id: { type: Number, unique: true, sparse: true },
+    company_id: { type: Number, required: true },
+    name: { type: String, required: true },
+    category: { type: String, required: true },
+    type: { type: String, required: true },
+    size: { type: String, required: true },
+    url: { type: String, required: true },
+    cloudinaryId: { type: String, required: true },
+    uploaded_by: { type: Number },
+    uploadedBy: { type: String },
+    uploadDate: { type: Date, default: Date.now },
+    status: { type: String, default: 'active', enum: ['active', 'archived'] },
+    is_private: { type: Boolean, default: false },
+    tags: { type: [String], default: [] }
+});
+
+articleSchema.pre('save', async function(next) {
+    if (!this.id) {
+        this.id = await getNextId('Article');
+    }
+    next();
+});
+
+module.exports.articleSchema = articleSchema;

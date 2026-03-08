@@ -199,6 +199,72 @@ export const deleteDocument = async (documentId) => {
     }
 };
 
+// Knowledge Base API
+export const uploadArticle = async (file, category, isPrivate) => {
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('category', category);
+        formData.append('is_private', isPrivate);
+        formData.append('uploadedBy', localStorage.getItem('username') || 'User');
+        
+        const response = await axios.post(`${BACKEND_URL}/knowledgebase/upload`, formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+                ...getAuthHeaders()
+            },
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Error uploading article:', error);
+        throw error;
+    }
+};
+
+export const listArticles = async (category = 'all', search = '') => {
+    try {
+        const params = new URLSearchParams();
+        if (category && category !== 'all') {
+            params.append('category', category);
+        }
+        if (search) {
+            params.append('search', search);
+        }
+        
+        const response = await axios.get(`${BACKEND_URL}/knowledgebase/list?${params.toString()}`, {
+            headers: getAuthHeaders()
+        });
+        return response.data.articles || [];
+    } catch (error) {
+        console.error('Error listing articles:', error);
+        throw error;
+    }
+};
+
+export const deleteArticle = async (articleId) => {
+    try {
+        const response = await axios.delete(`${BACKEND_URL}/knowledgebase/${articleId}`, {
+            headers: getAuthHeaders()
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Error deleting article:', error);
+        throw error;
+    }
+};
+
+export const viewArticle = async (articleId) => {
+    try {
+        const response = await axios.get(`${BACKEND_URL}/knowledgebase/view/${articleId}`, {
+            headers: getAuthHeaders()
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Error viewing article:', error);
+        throw error;
+    }
+};
+
 // Audit Logs
 export const getAuditLogs = async ({ search = '', result = 'all', action = '', start = '', end = '', page = 1, limit = 50 } = {}) => {
     try {

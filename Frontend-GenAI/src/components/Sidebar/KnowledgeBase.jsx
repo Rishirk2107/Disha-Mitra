@@ -1,67 +1,129 @@
-import  { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { uploadArticle, listArticles, deleteArticle, viewArticle } from '../../api';
 
 const KnowledgeBase = () => {
+    const [articles, setArticles] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('all');
-    
+    const [uploadProgress, setUploadProgress] = useState(0);
+    const [isUploading, setIsUploading] = useState(false);
+    const [showUploadModal, setShowUploadModal] = useState(false);
+    const [selectedFile, setSelectedFile] = useState(null);
+    const [selectedUploadCategory, setSelectedUploadCategory] = useState('policies');
+    const [isPrivateUpload, setIsPrivateUpload] = useState(false);
+    const [uploadError, setUploadError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [viewedArticle, setViewedArticle] = useState(null);
+    const [showViewModal, setShowViewModal] = useState(false);
+
     const categories = [
-        { id: 'all', name: 'All Topics', icon: 'quiz', count: 45 },
-        { id: 'policies', name: 'Company Policies', icon: 'policy', count: 12 },
-        { id: 'procedures', name: 'Procedures', icon: 'list_alt', count: 18 },
-        { id: 'technical', name: 'Technical Docs', icon: 'engineering', count: 8 },
-        { id: 'hr', name: 'HR Guidelines', icon: 'people', count: 7 }
+        { id: 'all', name: 'All Topics', icon: 'quiz' },
+        { id: 'policies', name: 'Company Policies', icon: 'policy' },
+        { id: 'procedures', name: 'Procedures', icon: 'list_alt' },
+        { id: 'technical', name: 'Technical Docs', icon: 'engineering' },
+        { id: 'hr', name: 'HR Guidelines', icon: 'people' }
     ];
 
-    const articles = [
-        {
-            id: 1,
-            title: 'Employee Code of Conduct',
-            category: 'policies',
-            summary: 'Comprehensive guide to professional behavior and ethical standards',
-            views: 1200,
-            lastUpdated: '2025-01-15',
-            tags: ['ethics', 'behavior', 'guidelines'],
-            difficulty: 'beginner'
-        },
-        {
-            id: 2,
-            title: 'Data Security Protocols',
-            category: 'technical',
-            summary: 'Best practices for handling sensitive company information',
-            views: 850,
-            lastUpdated: '2025-02-01',
-            tags: ['security', 'data', 'protocols'],
-            difficulty: 'advanced'
-        },
-        {
-            id: 3,
-            title: 'Remote Work Guidelines',
-            category: 'hr',
-            summary: 'Policies and procedures for remote work arrangements',
-            views: 950,
-            lastUpdated: '2025-01-20',
-            tags: ['remote', 'work', 'policy'],
-            difficulty: 'beginner'
-        },
-        {
-            id: 4,
-            title: 'API Integration Guide',
-            category: 'technical',
-            summary: 'Step-by-step guide for integrating with company APIs',
-            views: 420,
-            lastUpdated: '2025-02-10',
-            tags: ['api', 'integration', 'development'],
-            difficulty: 'expert'
+    useEffect(() => {
+        fetchArticles();
+    }, [selectedCategory]);
+
+    const fetchArticles = async () => {
+        try {
+            setIsLoading(true);
+            const data = await listArticles(selectedCategory === 'all' ? '' : selectedCategory);
+            setArticles(data);
+        } catch (error) {
+            console.error('Failed to fetch articles:', error);
+        } finally {
+            setIsLoading(false);
         }
-    ];
+    };
+
+    const handleUploadSubmit = async () => {
+        if (!selectedFile) {
+            setUploadError('Please select a file');
+            return;
+        }
+
+        try {
+            setUploadError('');
+            setIsUploading(true);
+            setUploadProgress(0);
+
+            // Simulate progress
+            let progressInterval = setInterval(() => {
+                setUploadProgress(prev => {
+                    if (prev >= 90) {
+                        clearInterval(progressInterval);
+                        return prev;
+                    }
+                    return prev + 10;
+                });
+            }, 100);
+
+            await uploadArticle(selectedFile, selectedUploadCategory, isPrivateUpload);
+
+            clearInterval(progressInterval);
+            setUploadProgress(100);
+            
+            setTimeout(() => {
+                setIsUploading(false);
+                setUploadProgress(0);
+                setShowUploadModal(false);
+                setSelectedFile(null);
+                setIsPrivateUpload(false);
+                fetchArticles();
+            }, 500);
+        } catch (error) {
+            console.error('Upload failed:', error);
+            setUploadError(error.response?.data?.error || 'Upload failed. Please try again.');
+            setIsUploading(false);
+            setUploadProgress(0);
+        }
+    };
+
+    const handleDeleteArticle = async (articleId) => {
+        if (window.confirm('Are you sure you want to delete this article?')) {
+            try {
+                await deleteArticle(articleId);
+                fetchArticles();
+            } catch (error) {
+                console.error('Delete failed:', error);
+                alert('Failed to delete article');
+            }
+        }
+    };
+
+    const handleViewArticle = async (article) => {
+        try {
+            const { viewUrl } = await viewArticle(article._id || article.id);
+            setViewedArticle({ ...article, url: viewUrl });
+            setShowViewModal(true);
+        } catch (error) {
+            console.error('View failed:', error);
+            alert('Failed to load article preview');
+        }
+    };
 
     const filteredArticles = articles.filter(article => {
-        const matchesSearch = article.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                            article.summary.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                            article.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
+        const matchesSearch = article.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                            (article.tags && article.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase())));
+        // Category matching
         const matchesCategory = selectedCategory === 'all' || article.category === selectedCategory;
+        
         return matchesSearch && matchesCategory;
     });
+
+    const getViewerSrc = (doc) => {
+        if (!doc || !doc.url) return '';
+        const isPdf = doc.type === 'PDF' || doc.name?.toLowerCase().endsWith('.pdf');
+        if (isPdf) {
+            const encoded = encodeURIComponent(doc.url);
+            return `https://docs.google.com/gview?url=${encoded}&embedded=true`;
+        }
+        return doc.url;
+    };
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-[#f5f7fa] to-[#c3cfe2] p-6">
@@ -76,7 +138,10 @@ const KnowledgeBase = () => {
                                 <p className="text-gray-600">Find answers and learn about company processes</p>
                             </div>
                         </div>
-                        <button className="bg-[#00796b] text-white px-6 py-3 rounded-lg font-semibold hover:bg-[#004d40] transition-colors duration-200 flex items-center gap-2">
+                        <button 
+                            onClick={() => setShowUploadModal(true)}
+                            className="bg-[#00796b] text-white px-6 py-3 rounded-lg font-semibold hover:bg-[#004d40] transition-colors duration-200 flex items-center gap-2"
+                        >
                             <span className="material-symbols-outlined">add</span>
                             Add Article
                         </button>
@@ -91,23 +156,11 @@ const KnowledgeBase = () => {
                         </span>
                         <input
                             type="text"
-                            placeholder="Search articles, guides, and documentation..."
+                            placeholder="Search articles by name or tags..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             className="w-full pl-12 pr-4 py-4 text-lg border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00796b] focus:border-transparent"
                         />
-                    </div>
-                    <div className="flex gap-2 mt-4">
-                        <span className="text-sm text-gray-600">Popular searches:</span>
-                        {['policies', 'security', 'remote work', 'API'].map(term => (
-                            <button
-                                key={term}
-                                onClick={() => setSearchTerm(term)}
-                                className="text-sm text-[#00796b] hover:underline"
-                            >
-                                {term}
-                            </button>
-                        ))}
                     </div>
                 </div>
 
@@ -130,11 +183,6 @@ const KnowledgeBase = () => {
                                         <span className="material-symbols-outlined text-xl">{category.icon}</span>
                                         <span className="font-medium">{category.name}</span>
                                     </div>
-                                    <span className={`text-xs px-2 py-1 rounded-full ${
-                                        selectedCategory === category.id ? 'bg-white text-[#00796b]' : 'bg-gray-200 text-gray-600'
-                                    }`}>
-                                        {category.count}
-                                    </span>
                                 </button>
                             ))}
                         </div>
@@ -145,15 +193,11 @@ const KnowledgeBase = () => {
                             <div className="space-y-3">
                                 <div className="flex justify-between text-sm">
                                     <span>Total Articles</span>
-                                    <span className="font-semibold text-[#00796b]">45</span>
+                                    <span className="font-semibold text-[#00796b]">{articles.length}</span>
                                 </div>
                                 <div className="flex justify-between text-sm">
-                                    <span>Most Viewed</span>
-                                    <span className="font-semibold text-[#00796b]">Code of Conduct</span>
-                                </div>
-                                <div className="flex justify-between text-sm">
-                                    <span>Last Updated</span>
-                                    <span className="font-semibold text-[#00796b]">Today</span>
+                                    <span>Private Articles</span>
+                                    <span className="font-semibold text-[#00796b]">{articles.filter(a => a.is_private).length}</span>
                                 </div>
                             </div>
                         </div>
@@ -161,87 +205,285 @@ const KnowledgeBase = () => {
 
                     {/* Articles List */}
                     <div className="lg:col-span-3 space-y-6">
-                        {filteredArticles.map(article => (
-                            <div key={article.id} className="bg-white rounded-lg shadow-lg p-6 hover:shadow-xl transition-shadow duration-200">
+                        {isLoading ? (
+                             <div className="text-center py-12">
+                                <span className="material-symbols-outlined text-4xl text-[#00796b] animate-spin">sync</span>
+                                <p className="mt-2 text-gray-600">Loading articles...</p>
+                            </div>
+                        ) : filteredArticles.map(article => (
+                            <div key={article._id || article.id} className="bg-white rounded-lg shadow-lg p-6 hover:shadow-xl transition-shadow duration-200">
                                 <div className="flex items-start justify-between mb-4">
                                     <div className="flex-1">
                                         <div className="flex items-center gap-3 mb-2">
-                                            <h3 className="text-xl font-semibold text-[#004d40] hover:text-[#00796b] cursor-pointer">
-                                                {article.title}
+                                            <h3 className="text-xl font-semibold text-[#004d40] cursor-pointer" onClick={() => handleViewArticle(article)}>
+                                                {article.name}
                                             </h3>
-                                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                                article.difficulty === 'beginner' ? 'bg-green-100 text-green-600' :
-                                                article.difficulty === 'advanced' ? 'bg-yellow-100 text-yellow-600' :
-                                                'bg-red-100 text-red-600'
-                                            }`}>
-                                                {article.difficulty}
+                                            {article.is_private && (
+                                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 flex items-center gap-1">
+                                                    <span className="material-symbols-outlined text-xs">lock</span>
+                                                    Private
+                                                </span>
+                                            )}
+                                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-600">
+                                                {article.type}
                                             </span>
                                         </div>
-                                        <p className="text-gray-600 mb-3">{article.summary}</p>
-                                        <div className="flex items-center gap-4 text-sm text-gray-500">
-                                            <div className="flex items-center gap-1">
-                                                <span className="material-symbols-outlined text-xs">visibility</span>
-                                                <span>{article.views} views</span>
-                                            </div>
+                                        <div className="flex items-center gap-4 text-sm text-gray-500 mb-3">
                                             <div className="flex items-center gap-1">
                                                 <span className="material-symbols-outlined text-xs">schedule</span>
-                                                <span>Updated {article.lastUpdated}</span>
+                                                <span>{new Date(article.uploadDate).toLocaleDateString()}</span>
                                             </div>
                                             <div className="flex items-center gap-1">
                                                 <span className="material-symbols-outlined text-xs">category</span>
-                                                <span>{categories.find(c => c.id === article.category)?.name}</span>
+                                                <span>{categories.find(c => c.id === article.category)?.name || article.category}</span>
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                <span className="material-symbols-outlined text-xs">storage</span>
+                                                <span>{article.size}</span>
                                             </div>
                                         </div>
                                     </div>
                                     <div className="flex gap-2 ml-4">
-                                        <button className="p-2 text-gray-500 hover:text-[#00796b] hover:bg-gray-100 rounded-lg transition-colors duration-200">
-                                            <span className="material-symbols-outlined">bookmark_add</span>
+                                        <button 
+                                            onClick={() => handleViewArticle(article)}
+                                            className="p-2 text-gray-500 hover:text-[#00796b] hover:bg-gray-100 rounded-lg transition-colors duration-200"
+                                            title="View"
+                                        >
+                                            <span className="material-symbols-outlined">visibility</span>
                                         </button>
-                                        <button className="p-2 text-gray-500 hover:text-[#00796b] hover:bg-gray-100 rounded-lg transition-colors duration-200">
-                                            <span className="material-symbols-outlined">share</span>
+                                        <button 
+                                            onClick={() => handleDeleteArticle(article._id || article.id)}
+                                            className="p-2 text-gray-500 hover:text-red-500 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+                                            title="Delete"
+                                        >
+                                            <span className="material-symbols-outlined">delete</span>
                                         </button>
                                     </div>
                                 </div>
                                 
                                 {/* Tags */}
-                                <div className="flex items-center gap-2 mb-4">
-                                    <span className="text-sm text-gray-500">Tags:</span>
-                                    {article.tags.map(tag => (
-                                        <span
-                                            key={tag}
-                                            className="px-2 py-1 bg-[#e0f2f1] text-[#00796b] text-xs rounded-full cursor-pointer hover:bg-[#00796b] hover:text-white transition-colors duration-200"
-                                            onClick={() => setSearchTerm(tag)}
-                                        >
-                                            {tag}
+                                {article.tags && article.tags.length > 0 && (
+                                    <div className="flex items-center gap-2 mb-4 flex-wrap">
+                                        <span className="text-sm text-gray-500 flex items-center gap-1">
+                                            <span className="material-symbols-outlined text-xs">label</span>
+                                            Tags:
                                         </span>
-                                    ))}
-                                </div>
+                                        {article.tags.map((tag, idx) => (
+                                            <span
+                                                key={idx}
+                                                className="px-2 py-1 bg-[#e0f2f1] text-[#00796b] text-xs rounded-full cursor-pointer hover:bg-[#00796b] hover:text-white transition-colors duration-200"
+                                                onClick={() => setSearchTerm(tag)}
+                                            >
+                                                {tag}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
 
                                 {/* Action Buttons */}
                                 <div className="flex gap-3">
-                                    <button className="bg-[#00796b] text-white px-4 py-2 rounded-lg hover:bg-[#004d40] transition-colors duration-200">
+                                    <button 
+                                        onClick={() => handleViewArticle(article)}
+                                        className="bg-[#00796b] text-white px-4 py-2 rounded-lg hover:bg-[#004d40] transition-colors duration-200 text-sm"
+                                    >
                                         Read Article
-                                    </button>
-                                    <button className="border border-[#00796b] text-[#00796b] px-4 py-2 rounded-lg hover:bg-[#00796b] hover:text-white transition-colors duration-200">
-                                        Quick Preview
                                     </button>
                                 </div>
                             </div>
                         ))}
 
-                        {filteredArticles.length === 0 && (
+                        {!isLoading && filteredArticles.length === 0 && (
                             <div className="bg-white rounded-lg shadow-lg p-12 text-center">
                                 <span className="material-symbols-outlined text-6xl text-gray-300 mb-4">search_off</span>
                                 <h3 className="text-xl font-semibold text-gray-600 mb-2">No articles found</h3>
                                 <p className="text-gray-500 mb-4">Try adjusting your search terms or browse different categories.</p>
-                                <button className="bg-[#00796b] text-white px-6 py-3 rounded-lg hover:bg-[#004d40] transition-colors duration-200">
-                                    Browse All Articles
-                                </button>
                             </div>
                         )}
                     </div>
                 </div>
             </div>
+
+            {/* Upload Modal */}
+            {showUploadModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-lg shadow-2xl max-w-md w-full">
+                        <div className="bg-[#00796b] text-white p-6 rounded-t-lg flex items-center justify-between">
+                            <h2 className="text-xl font-bold flex items-center gap-2">
+                                <span className="material-symbols-outlined">upload_file</span>
+                                Upload Article
+                            </h2>
+                            <button
+                                onClick={() => {
+                                    setShowUploadModal(false);
+                                    setSelectedFile(null);
+                                    setUploadError('');
+                                }}
+                                className="text-white hover:bg-[#004d40] p-1 rounded transition-colors"
+                            >
+                                <span className="material-symbols-outlined">close</span>
+                            </button>
+                        </div>
+
+                        <div className="p-6 space-y-4">
+                            {uploadError && (
+                                <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg">
+                                    <p className="text-sm">{uploadError}</p>
+                                </div>
+                            )}
+
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    Category
+                                </label>
+                                <select
+                                    value={selectedUploadCategory}
+                                    onChange={(e) => setSelectedUploadCategory(e.target.value)}
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00796b] focus:border-transparent bg-white"
+                                >
+                                    {categories.filter(cat => cat.id !== 'all').map(category => (
+                                        <option key={category.id} value={category.id}>
+                                            {category.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Privacy Toggle */}
+                            <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                <div className="relative inline-block w-10 h-6 transition duration-200 ease-in-out">
+                                    <input
+                                        type="checkbox"
+                                        id="privacy-toggle"
+                                        className="peer absolute opacity-0 w-0 h-0"
+                                        checked={isPrivateUpload}
+                                        onChange={(e) => setIsPrivateUpload(e.target.checked)}
+                                    />
+                                    <label
+                                        htmlFor="privacy-toggle"
+                                        className={`block overflow-hidden h-6 rounded-full cursor-pointer transition-colors duration-200 ${
+                                            isPrivateUpload ? 'bg-[#00796b]' : 'bg-gray-300'
+                                        }`}
+                                    >
+                                        <span className={`block h-4 w-4 ml-1 mt-1 bg-white rounded-full shadow transform transition-transform duration-200 ${
+                                            isPrivateUpload ? 'translate-x-4' : 'translate-x-0'
+                                        }`} />
+                                    </label>
+                                </div>
+                                <div>
+                                    <label htmlFor="privacy-toggle" className="block text-sm font-semibold text-gray-700 cursor-pointer">
+                                        Private Article
+                                    </label>
+                                    <p className="text-xs text-gray-500">Only visible to you</p>
+                                </div>
+                            </div>
+
+                            {selectedFile && (
+                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                    <p className="text-sm font-medium text-gray-700 mb-1">Selected File:</p>
+                                    <div className="flex items-center gap-2">
+                                        <span className="material-symbols-outlined text-blue-600">description</span>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-sm text-gray-600 truncate">{selectedFile.name}</p>
+                                            <p className="text-xs text-gray-500">{(selectedFile.size / (1024 * 1024)).toFixed(2)} MB</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div>
+                                <label
+                                    htmlFor="modalFileInput"
+                                    className="block w-full border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-[#00796b] hover:bg-[#f5f7fa] transition-colors"
+                                >
+                                    <span className="material-symbols-outlined text-4xl text-gray-400 block mb-2">cloud_upload</span>
+                                    <p className="text-sm font-medium text-gray-700">Choose a file</p>
+                                    <p className="text-xs text-gray-500 mt-1">PDF, DOCX, TXT up to 50MB</p>
+                                </label>
+                                <input
+                                    type="file"
+                                    id="modalFileInput"
+                                    accept=".pdf,.doc,.docx,.txt"
+                                    onChange={(e) => {
+                                        const files = e.target.files;
+                                        if (files && files.length > 0) {
+                                            setSelectedFile(files[0]);
+                                            setUploadError('');
+                                        }
+                                    }}
+                                    className="hidden"
+                                />
+                            </div>
+
+                            {isUploading && (
+                                <div className="bg-gray-50 rounded-lg p-4">
+                                    <div className="flex items-center gap-3 mb-2">
+                                        <span className="material-symbols-outlined text-[#00796b] animate-spin">sync</span>
+                                        <p className="text-sm font-medium text-gray-700">Uploading...</p>
+                                    </div>
+                                    <div className="w-full bg-gray-200 rounded-full h-2">
+                                        <div
+                                            className="bg-[#00796b] h-2 rounded-full transition-all duration-300"
+                                            style={{ width: `${uploadProgress}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="bg-gray-50 px-6 py-4 rounded-b-lg flex gap-3 justify-end">
+                            <button
+                                onClick={() => {
+                                    setShowUploadModal(false);
+                                    setSelectedFile(null);
+                                    setUploadError('');
+                                }}
+                                disabled={isUploading}
+                                className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleUploadSubmit}
+                                disabled={isUploading || !selectedFile}
+                                className="px-6 py-2 bg-[#00796b] text-white rounded-lg hover:bg-[#004d40] transition-colors disabled:opacity-50 flex items-center gap-2"
+                            >
+                                <span className="material-symbols-outlined">upload</span>
+                                Upload
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* View Modal */}
+            {showViewModal && viewedArticle && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-lg shadow-2xl max-w-6xl w-full h-[90vh] flex flex-col">
+                        <div className="bg-[#00796b] text-white p-4 rounded-t-lg flex items-center justify-between">
+                            <h2 className="text-lg font-bold flex items-center gap-2 truncate">
+                                <span className="material-symbols-outlined">visibility</span>
+                                {viewedArticle.name}
+                            </h2>
+                            <button
+                                onClick={() => {
+                                    setShowViewModal(false);
+                                    setViewedArticle(null);
+                                }}
+                                className="text-white hover:bg-[#004d40] p-2 rounded transition-colors"
+                            >
+                                <span className="material-symbols-outlined">close</span>
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-hidden bg-gray-100">
+                             <iframe
+                                src={getViewerSrc(viewedArticle)}
+                                className="w-full h-full border-0"
+                                title="Article viewer"
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

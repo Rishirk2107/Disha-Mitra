@@ -7,22 +7,31 @@ from io import BytesIO
 from dotenv import load_dotenv
 from google import genai
 from pinecone import Pinecone, ServerlessSpec
+from sentence_transformers import SentenceTransformer
 
 load_dotenv()
 
 # Configuration from environment (set these in .env or environment)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-EMBED_MODEL = "text-embedding-004"  # New Gemini embedding model
 CHAT_MODEL = "gemini-2.5-flash-lite"  # New Gemini chat model
+
+# Load SentenceTransformer model for embeddings
+hf_model = SentenceTransformer("intfloat/e5-base-v2")
 
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_ENV = os.getenv("PINECONE_ENV")
 PINECONE_INDEX = os.getenv("PINECONE_INDEX", "genai-index")
 
+
 # Gemini API client
 genai_client = None
 if GEMINI_API_KEY:
-    genai_client = genai.Client(api_key=GEMINI_API_KEY)
+    genai_client = genai.Client(api_key=GEMINI_API_KEY,  http_options={"api_version": "v1"})
+
+models = genai_client.models.list()
+
+for m in models:
+    print(m.name)
 
 # Pinecone client
 pc = None
@@ -92,21 +101,13 @@ def _chunk_text(text: str, max_chars: int = 1000):
 
 
 def _embed_texts(texts):
-    """Generate embeddings for text chunks using Gemini."""
-    if not GEMINI_API_KEY:
-        raise EnvironmentError("GEMINI_API_KEY not set")
-    if genai_client is None:
-        raise EnvironmentError("genai_client not initialized")
-
-    embeddings = []
-    for text in texts:
-        resp = genai_client.models.embed_content(
-            model=EMBED_MODEL,
-            contents=text
-        )
-        vec = np.array(resp.embeddings[0].values, dtype=np.float32)
-        embeddings.append(vec)
-    return embeddings
+    """Generate embeddings for text chunks using SentenceTransformer."""
+    embeddings = hf_model.encode(
+        texts,
+        convert_to_numpy=True,
+        normalize_embeddings=True
+    )
+    return [np.array(e, dtype=np.float32) for e in embeddings]
 
 
 def _ensure_pinecone_index(dim: int):
@@ -167,6 +168,95 @@ def load_faiss_index():
         print("Document index not found. Please process a document first using process_document().")
     else:
         print("Index ready. Use process_prompt() to query the documents.")
+
+
+def generate_tags(text: str) -> list:
+    """Generate 3-4 tags for the article using Gemini."""
+    if not GEMINI_API_KEY:
+        raise EnvironmentError("GEMINI_API_KEY not set")
+    if genai_client is None:
+        raise EnvironmentError("genai_client not initialized")
+    
+    prompt = (
+        "Generate 3 to 4 relevant tags for the following text. "
+        "Return ONLY the tags separated by commas, no other text.\n\n"
+        f"TEXT: {text[:2000]}..." # Limit text to avoid token limits
+    )
+    
+    try:
+        resp = genai_client.models.generate_content(
+            model=CHAT_MODEL,
+            contents=prompt
+        )
+        
+        tags_text = resp.text
+        # Clean up the response - remove brackets, quotes if any
+        tags_text = tags_text.replace('[', '').replace(']', '').replace('"', '').replace("'", "")
+        tags = [tag.strip() for tag in tags_text.split(',') if tag.strip()]
+        return tags[:4]
+    except Exception as e:
+        print(f"[TAGS] Error generating tags: {e}")
+        return []
+
+
+def process_article(document_path, namespace: str = None, company_id: int = None,
+                    user_id: int = None, article_id: str = None, source: str = None, 
+                    category: str = None, is_private: bool = False):
+    """Process article: extract text, generate tags, embed, and upsert."""
+    print(f"[ARTICLE] Starting process_article: article_id={article_id}, is_private={is_private}")
+    
+    text = _extract_text(document_path)
+    if not text:
+        raise ValueError("No text found in the provided article.")
+        
+    # Generate tags
+    tags = generate_tags(text)
+    print(f"[ARTICLE] Generated tags: {tags}")
+    
+    chunks = _chunk_text(text, max_chars=1200)
+    embeddings = _embed_texts(chunks)
+    
+    idx = _ensure_pinecone_index(dim=len(embeddings[0]))
+    vectors = []
+    ts = int(time.time())
+    
+    for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+        vid = f"art-{ts}-{i}"
+        metadata = {
+            "text": chunk,
+            "is_private": is_private,
+            "tags": tags
+        }
+        if company_id is not None:
+            try:
+                metadata["company_id"] = int(company_id)
+            except (TypeError, ValueError):
+                metadata["company_id"] = company_id
+        if user_id is not None:
+            try:
+                metadata["user_id"] = int(user_id)
+            except (TypeError, ValueError):
+                metadata["user_id"] = user_id
+        if article_id is not None:
+            metadata["article_id"] = str(article_id)
+        if source is not None:
+            metadata["source"] = str(source)
+        if category is not None:
+            metadata["category"] = str(category)
+
+        vectors.append({
+            "id": vid,
+            "values": emb.tolist(),
+            "metadata": metadata
+        })
+        
+    upsert_kwargs = {"vectors": vectors}
+    if namespace:
+        upsert_kwargs["namespace"] = namespace
+    idx.upsert(**upsert_kwargs)
+    
+    print(f"[ARTICLE] Processed and upserted {len(vectors)} chunks.")
+    return tags
 
 def process_document(document_path, namespace: str = None, company_id: int = None,
                     user_id: int = None, pdf_id: str = None, source: str = None, category: str = None):
@@ -231,11 +321,11 @@ def process_prompt(prompt: str, top_k: int = 4, namespace: str = None,
         raise EnvironmentError("genai_client not initialized")
 
     # Embed the query
-    qresp = genai_client.models.embed_content(
-        model=EMBED_MODEL,
-        contents=prompt
-    )
-    q_vec = qresp.embeddings[0].values
+    q_vec = hf_model.encode(
+        prompt,
+        convert_to_numpy=True,
+        normalize_embeddings=True
+    ).tolist()
     print(f"[QUERY] Query vector dimension: {len(q_vec)}")
 
     idx = pc.Index(PINECONE_INDEX)

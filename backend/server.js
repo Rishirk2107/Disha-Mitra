@@ -5,6 +5,7 @@ const bodyParser=require("body-parser");
 const authRoutes=require("./routes/authRoutes");
 const issueRoute=require("./routes/issueRoute");
 const documentRoutes=require("./routes/documentRoutes");
+const knowledgebaseRoutes=require("./routes/knowledgebaseRoutes");
 const roleRoutes=require("./routes/roleRoutes");
 const teamChatRoutes=require("./routes/teamChatRoutes");
 const externalApiRoutes=require("./routes/externalApiRoutes");
@@ -46,6 +47,7 @@ app.get('/health', (req, res) => {
 app.use("/auth",authRoutes);
 app.use("/issue",issueRoute);
 app.use("/document",documentRoutes);
+app.use("/knowledgebase",knowledgebaseRoutes);
 app.use("/role",roleRoutes);
 app.use("/team-chat",teamChatRoutes);
 app.use("/api/v1", externalApiRoutes);
